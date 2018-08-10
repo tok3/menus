@@ -4,6 +4,7 @@ namespace Tok3\Menus;
 use BadMethodCallException;
 use Collective\Html\HtmlBuilder;
 use Illuminate\Routing\UrlGenerator;
+use Illuminate\Support\Str;
 
 class Builder
 {
@@ -11,6 +12,11 @@ class Builder
 	 * @var array
 	 */
 	protected $items;
+
+	/**
+	 * @var array
+	 */
+	protected $groupStack = [];
 
 	/**
 	 * @var Collective\Html\HtmlBuilder
@@ -177,11 +183,11 @@ class Builder
 	}
 
 	/*
-	|--------------------------------------------------------------------------
-	| Fetching Methods
-	|--------------------------------------------------------------------------
-	|
-	*/
+    |--------------------------------------------------------------------------
+    | Fetching Methods
+    |--------------------------------------------------------------------------
+    |
+    */
 
 	/**
 	 * Fetches and returns all menu items.
@@ -278,11 +284,11 @@ class Builder
 	}
 
 	/*
-	|--------------------------------------------------------------------------
-	| Dispatch Methods
-	|--------------------------------------------------------------------------
-	|
-	*/
+    |--------------------------------------------------------------------------
+    | Dispatch Methods
+    |--------------------------------------------------------------------------
+    |
+    */
 
 	/**
 	 * Get the action type from the options.
@@ -319,19 +325,23 @@ class Builder
 
 		$secure = (isset($options['secure']) and $options['secure'] === true) ? true : false;
 
+		if ($prefix) {
+			$prefix = $prefix.'/';
+		}
+
 		if (is_array($url)) {
 			if (self::isAbsolute($url[0])) {
 				return $url[0];
 			}
 
-			return $this->url->to($prefix.'/'.$url[0], array_slice($url, 1), $secure);
+			return $this->url->to($prefix.$url[0], array_slice($url, 1), $secure);
 		}
 
 		if (self::isAbsolute($url)) {
 			return $url;
 		}
 
-		return $this->url->to($prefix.'/'.$url, array(), $secure);
+		return $this->url->to($prefix.$url, array(), $secure);
 	}
 
 	/**
@@ -379,11 +389,11 @@ class Builder
 	}
 
 	/*
-	|--------------------------------------------------------------------------
-	| Filter Methods
-	|--------------------------------------------------------------------------
-	|
-	*/
+    |--------------------------------------------------------------------------
+    | Filter Methods
+    |--------------------------------------------------------------------------
+    |
+    */
 
 	/**
 	 * Filter menu items through a callback.
@@ -417,9 +427,9 @@ class Builder
 	{
 		$collection = new Collection;
 
-		$this->items->each(function($item) use ($attribute, $value, &$collection) {
+		$this->items->each(function ($item) use ($attribute, $value, &$collection) {
 			if (! property_exists($item, $attribute)) {
-				return $false;
+				return false;
 			}
 
 			if ($item->$attribute == $value) {
@@ -443,7 +453,7 @@ class Builder
 	 */
 	public function sortBy($key)
 	{
-		$this->items = $this->items->sortBy(function($item) use ($key) {
+		$this->items = $this->items->sortBy(function ($item) use ($key) {
 			return $item->$key;
 		});
 
@@ -459,7 +469,7 @@ class Builder
 	 */
 	public function sortByDesc($key)
 	{
-		$this->items = $this->items->sortByDesc(function($item) use ($key) {
+		$this->items = $this->items->sortByDesc(function ($item) use ($key) {
 			return $item->$key;
 		});
 
@@ -475,79 +485,25 @@ class Builder
 	{
 		if (class_exists('Caffeinated\Shinobi\Shinobi')) {
 			$this->filter(function ($item) {
-	            if (! $item->data('can') and ! $item->data('canatleast')) {
-	                return true;
-	            } elseif ($item->data('canatleast')) {
+				if (! $item->data('can') and ! $item->data('canatleast')) {
+					return true;
+				} elseif ($item->data('canatleast')) {
 					return \Shinobi::canAtLeast($item->data('canatleast'));
 				} else {
 					return \Shinobi::can($item->data('can'));
 				}
-	        });
+			});
 		}
 
 		return $this;
 	}
 
-	/**
-	 * Dynamic search method against a menu attribute.
-	 *
-	 * @param string $method
-	 * @param array  $args
-	 *
-	 * @return Item|bool
-	 */
-	public function __call($method, $args)
-	{
-		preg_match('/^[W|w]here([a-zA-Z0-9_]+)$/', $method, $matches);
-
-		if ($matches) {
-			$attribute = strtolower($matches[1]);
-		} else {
-			throw new BadMethodCallException('Call to undefined method '.$method);
-		}
-
-		$value     = $args ? $args[0] : null;
-		$recursive = isset($args[1]) ? $args[1] : false;
-
-		if ($recursive) {
-			return $this->filterRecursively($attribute, $value);
-		}
-
-		return $this->items->filter(function($item) use ($attribute, $value) {
-			if (! property_exists($item, $attribute)) {
-				return false;
-			}
-
-			if ($item->$attribute == $value) {
-				return true;
-			}
-
-			return false;
-		})->values();
-	}
-
-	/**
-	 * Returns menu item by name.
-	 *
-	 * @param string $property
-	 *
-	 * @return Item
-	 */
-	public function __get($property)
-	{
-		if (property_exists($this, $property)) {
-			return $this->$property;
-		}
-
-		return $this->whereSlug($property)->first();
-	}
-
 	/*
-        |--------------------------------------------------------------------------
-        | Rendering Methods
-        |--------------------------------------------------------------------------
-        |
-        */
+    |--------------------------------------------------------------------------
+    | Rendering Methods
+    |--------------------------------------------------------------------------
+    |
+    */
 
 	/**
 	 * Renders the menu as an unordered list.
@@ -582,7 +538,7 @@ class Builder
 			}
 
 			if ($item->hasChildren()) {
-				$items .= "<{$type} class='nav nav-second-level'>";
+				$items .= "<{$type}>";
 				$items .= $this->render($type, $item->id);
 				$items .= "</{$type}>";
 			}
@@ -597,4 +553,61 @@ class Builder
 		return $items;
 	}
 
+	/**
+	 * Dynamic search method against a menu attribute.
+	 *
+	 * @param string $method
+	 * @param array  $args
+	 *
+	 * @return Item|bool
+	 */
+	public function __call($method, $args)
+	{
+		preg_match('/^[W|w]here([a-zA-Z0-9_]+)$/', $method, $matches);
+
+		if ($matches) {
+			$attribute = Str::lower($matches[1]);
+		} else {
+			throw new BadMethodCallException('Call to undefined method '.$method);
+		}
+
+		$value     = $args ? $args[0] : null;
+		$recursive = isset($args[1]) ? $args[1] : false;
+
+		if ($recursive) {
+			return $this->filterRecursively($attribute, $value);
+		}
+
+		return $this->items->filter(function ($item) use ($attribute, $value) {
+			if (isset($item->data[$attribute]) && $item->data[$attribute] == $value) {
+				return true;
+			}
+
+			if (! property_exists($item, $attribute)) {
+				return false;
+			}
+
+			if ($item->$attribute == $value) {
+				return true;
+			}
+
+			return false;
+		})->values();
+	}
+
+	/**
+	 * Returns menu item by name.
+	 *
+	 * @param string $property
+	 *
+	 * @return Item
+	 */
+	public function __get($property)
+	{
+		if (property_exists($this, $property)) {
+			return $this->$property;
+		}
+
+		return $this->whereSlug($property)->first();
+	}
 }
